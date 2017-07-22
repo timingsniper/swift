@@ -42,6 +42,7 @@ namespace irgen {
   class ConstantReference;
   class Explosion;
   class FieldTypeInfo;
+  class FunctionPointer;
   class GenericTypeRequirements;
   class IRGenFunction;
   class IRGenModule;
@@ -204,6 +205,10 @@ namespace irgen {
                                            SILType objectType,
                                            bool suppressCast = false);
 
+  /// Given a non-tagged object pointer, load a pointer to its class object.
+  llvm::Value *emitLoadOfObjCHeapMetadataRef(IRGenFunction &IGF,
+                                             llvm::Value *object);
+
   /// Given a heap-object instance, with some heap-object type, produce a
   /// reference to its heap metadata by dynamically asking the runtime for it.
   llvm::Value *emitHeapMetadataRefForUnknownHeapObject(IRGenFunction &IGF,
@@ -225,13 +230,16 @@ namespace irgen {
 
   /// Given an instance pointer (or, for a static method, a class
   /// pointer), emit the callee for the given method.
-  llvm::Value *emitVirtualMethodValue(IRGenFunction &IGF,
-                                      llvm::Value *base,
-                                      SILType baseType,
-                                      SILDeclRef method,
-                                      CanSILFunctionType methodType,
-                                      bool useSuperVTable);
+  FunctionPointer emitVirtualMethodValue(IRGenFunction &IGF,
+                                         llvm::Value *base,
+                                         SILType baseType,
+                                         SILDeclRef method,
+                                         CanSILFunctionType methodType,
+                                         bool useSuperVTable);
 
+  /// Get the offset of the given class method within the class's vtables.
+  unsigned getVirtualMethodIndex(IRGenModule &IGM, SILDeclRef method);
+  
   /// \brief Load a reference to the protocol descriptor for the given protocol.
   ///
   /// For Swift protocols, this is a constant reference to the protocol
@@ -290,9 +298,8 @@ namespace irgen {
   bool isTypeMetadataAccessTrivial(IRGenModule &IGM, CanType type);
 
   /// Determine how the given type metadata should be accessed.
-  MetadataAccessStrategy getTypeMetadataAccessStrategy(IRGenModule &IGM,
-                                                       CanType type);
-  
+  MetadataAccessStrategy getTypeMetadataAccessStrategy(CanType type);
+
   /// Return the address of a function that will return type metadata 
   /// for the given non-dependent type.
   llvm::Function *getOrCreateTypeMetadataAccessFunction(IRGenModule &IGM,

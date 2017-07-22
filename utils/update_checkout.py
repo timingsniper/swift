@@ -20,18 +20,13 @@ import traceback
 from functools import reduce
 from multiprocessing import freeze_support
 
-sys.path.append(os.path.dirname(__file__))
+from swift_build_support.swift_build_support import shell
+from swift_build_support.swift_build_support.SwiftBuildSupport import \
+    SWIFT_SOURCE_ROOT
 
-from SwiftBuildSupport import (
-    SWIFT_SOURCE_ROOT,
-)  # noqa (E402 module level import not at top of file)
 
 SCRIPT_FILE = os.path.abspath(__file__)
 SCRIPT_DIR = os.path.dirname(SCRIPT_FILE)
-
-sys.path.append(os.path.join(SCRIPT_DIR, 'swift_build_support'))
-
-from swift_build_support import shell  # noqa (E402)
 
 
 def confirm_tag_in_repo(tag, repo_name):
@@ -47,11 +42,15 @@ def confirm_tag_in_repo(tag, repo_name):
 def find_rev_by_timestamp(timestamp, repo_name, refspec):
     base_args = ["git", "log", "-1", "--format=%H",
                  '--before=' + timestamp]
-    # Prefer the most-recent change _made by swift-ci_ before the timestamp,
-    # falling back to most-recent in general if there is none by swift-ci.
-    rev = shell.capture(base_args + ['--author', 'swift-ci', refspec]).strip()
-    if rev:
-        return rev
+    # On repos with regular batch-automerges from swift-ci -- namely clang,
+    # llvm and lldb -- prefer the most-recent change _made by swift-ci_
+    # before the timestamp, falling back to most-recent in general if there
+    # is none by swift-ci.
+    if repo_name in ["llvm", "clang", "lldb"]:
+        rev = shell.capture(base_args +
+                            ['--author', 'swift-ci', refspec]).strip()
+        if rev:
+            return rev
     rev = shell.capture(base_args + [refspec]).strip()
     if rev:
         return rev
@@ -297,12 +296,14 @@ def dump_repo_hashes(config):
     fmt = "{:<%r}{}" % (max_len + 5)
     for repo_name, repo_info in sorted(config['repos'].items(),
                                        key=lambda x: x[0]):
-        with shell.pushd(os.path.join(SWIFT_SOURCE_ROOT, repo_name),
-                         dry_run=False,
-                         echo=False):
-            h = shell.capture(["git", "log", "--oneline", "-n", "1"],
-                              echo=False).strip()
-            print(fmt.format(repo_name, h))
+        repo_path = os.path.join(SWIFT_SOURCE_ROOT, repo_name)
+        if os.path.isdir(repo_path):
+            with shell.pushd(repo_path, dry_run=False, echo=False):
+                h = shell.capture(["git", "log", "--oneline", "-n", "1"],
+                                  echo=False).strip()
+                print(fmt.format(repo_name, h))
+        else:
+            print(fmt.format(repo_name, "(not checked out)"))
 
 
 def dump_hashes_config(args, config):
@@ -435,7 +436,7 @@ By default, updates your checkouts of Swift, SourceKit, LLDB, and SwiftPM.""")
     if args.reset_to_remote and not args.scheme:
         print("update-checkout usage error: --reset-to-remote must specify "
               "--scheme=foo")
-        exit(1)
+        sys.exit(1)
 
     clone = args.clone
     clone_with_ssh = args.clone_with_ssh

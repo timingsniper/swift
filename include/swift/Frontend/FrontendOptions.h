@@ -14,6 +14,7 @@
 #define SWIFT_FRONTEND_FRONTENDOPTIONS_H
 
 #include "swift/AST/Module.h"
+#include "llvm/ADT/Hashing.h"
 
 #include <string>
 #include <vector>
@@ -115,6 +116,9 @@ public:
   /// The path to which we should output fixits as source edits.
   std::string FixitsOutputPath;
 
+  /// The path to which we should output a loaded module trace file.
+  std::string LoadedModuleTracePath;
+
   /// Arguments which should be passed in immediate mode.
   std::vector<std::string> ImmediateArgv;
 
@@ -128,11 +132,28 @@ public:
   /// The path to collect the group information for the compiled source files.
   std::string GroupInfoPath;
 
+  /// The path to which we should store indexing data, if any.
+  std::string IndexStorePath;
+
+  /// Emit index data for imported serialized swift system modules.
+  bool IndexSystemModules = false;
+
   /// If non-zero, warn when a function body takes longer than this many
   /// milliseconds to type-check.
   ///
   /// Intended for debugging purposes only.
   unsigned WarnLongFunctionBodies = 0;
+
+  /// If non-zero, warn when type-checking an expression takes longer
+  /// than this many milliseconds.
+  ///
+  /// Intended for debugging purposes only.
+  unsigned WarnLongExpressionTypeChecking = 0;
+
+  /// If non-zero, overrides the default threshold for how long we let
+  /// the expression type checker run before we consider an expression
+  /// too complex.
+  unsigned SolverExpressionTimeThreshold = 0;
 
   enum ActionType {
     NoneAction, ///< No specific action
@@ -140,6 +161,7 @@ public:
     Typecheck, ///< Parse and type-check only
     DumpParse, ///< Parse only and dump AST
     DumpInterfaceHash, ///< Parse and dump the interface token hash.
+    EmitSyntax, ///< Parse and dump Syntax tree as JSON
     DumpAST, ///< Parse, type-check, and dump AST
     PrintAST, ///< Parse, type-check, and pretty-print AST
 
@@ -192,6 +214,9 @@ public:
   /// \sa swift::SharedTimer
   bool DebugTimeCompilation = false;
 
+  /// The path to which we should output statistics files.
+  std::string StatsOutputDir;
+
   /// Indicates whether function body parsing should be delayed
   /// until the end of all files.
   bool DelayedFunctionBodyParsing = false;
@@ -227,11 +252,6 @@ public:
   /// by the Clang importer as part of semantic analysis.
   bool SerializeBridgingHeader = false;
 
-  /// Enables the "fully fragile" resilience strategy.
-  ///
-  /// \see ResilienceStrategy::Fragile
-  bool SILSerializeAll = false;
-
   /// Indicates whether or not the frontend should print statistics upon
   /// termination.
   bool PrintStats = false;
@@ -264,8 +284,15 @@ public:
   /// variables by name when we print it out. This eases diffing of SIL files.
   bool EmitSortedSIL = false;
 
+  /// The different modes for validating TBD against the LLVM IR.
+  enum class TBDValidationMode {
+    None,           ///< Do no validation.
+    MissingFromTBD, ///< Only check for symbols that are in IR but not TBD.
+    All, ///< Check for symbols that are in IR but not TBD and TBD but not IR.
+  };
+
   /// Compare the symbols in the IR against the TBD file we would generate.
-  bool ValidateTBDAgainstIR = false;
+  TBDValidationMode ValidateTBDAgainstIR = TBDValidationMode::None;
 
   /// An enum with different modes for automatically crashing at defined times.
   enum class DebugCrashMode {
@@ -301,6 +328,12 @@ public:
   void setSingleOutputFilename(const std::string &FileName) {
     OutputFilenames.clear();
     OutputFilenames.push_back(FileName);
+  }
+
+  /// Return a hash code of any components from these options that should
+  /// contribute to a Swift Bridging PCH hash.
+  llvm::hash_code getPCHHashComponents() const {
+    return llvm::hash_value(0);
   }
 };
 

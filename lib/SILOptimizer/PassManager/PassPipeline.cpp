@@ -71,13 +71,24 @@ static void addOwnershipModelEliminatorPipeline(SILPassPipelinePlan &P) {
   P.addOwnershipModelEliminator();
 }
 
-static void addMandatoryOptPipeline(SILPassPipelinePlan &P) {
+static void addMandatoryOptPipeline(SILPassPipelinePlan &P,
+                                    const SILOptions &Options) {
   P.startPipeline("Guaranteed Passes");
+  if (Options.EnableMandatorySemanticARCOpts) {
+    P.addSemanticARCOpts();
+  }
+  P.addDiagnoseStaticExclusivity();
   P.addCapturePromotion();
+
+  // Select access kind after capture promotion and before stack promotion.
+  // This guarantees that stack-promotable boxes have [static] enforcement.
+  P.addAccessEnforcementSelection();
+
   P.addAllocBoxToStack();
   P.addNoReturnFolding();
+  P.addOwnershipModelEliminator();
+  P.addMarkUninitializedFixup();
   P.addDefiniteInitialization();
-
   P.addMandatoryInlining();
   P.addPredictableMemoryOptimizations();
   P.addDiagnosticConstantPropagation();
@@ -104,11 +115,8 @@ SILPassPipelinePlan::getDiagnosticPassPipeline(const SILOptions &Options) {
     return P;
   }
 
-  // Lower all ownership instructions right after SILGen for now.
-  addOwnershipModelEliminatorPipeline(P);
-
   // Otherwise run the rest of diagnostics.
-  addMandatoryOptPipeline(P);
+  addMandatoryOptPipeline(P, Options);
 
   if (SILViewGuaranteedCFG) {
     addCFGPrinterPipeline(P, "SIL View Guaranteed CFG");
@@ -421,18 +429,32 @@ SILPassPipelinePlan::getLoweringPassPipeline() {
   return P;
 }
 
-/// Non-mandatory passes that should run as preparation for IRGen.
-static void addIRGenPreparePipeline(SILPassPipelinePlan &P) {
+SILPassPipelinePlan
+SILPassPipelinePlan::getIRGenPreparePassPipeline(const SILOptions &Options) {
+  SILPassPipelinePlan P;
   P.startPipeline("IRGen Preparation");
   // Insert SIL passes to run during IRGen.
   // Hoist generic alloc_stack instructions to the entry block to enable better
   // llvm-ir generation for dynamic alloca instructions.
   P.addAllocStackHoisting();
+  if (Options.EnableLargeLoadableTypes) {
+    P.addLoadableByAddress();
+  }
+  return P;
 }
 
-SILPassPipelinePlan SILPassPipelinePlan::getIRGenPreparePassPipeline() {
+SILPassPipelinePlan
+SILPassPipelinePlan::getSILOptPreparePassPipeline(const SILOptions &Options) {
   SILPassPipelinePlan P;
-  addIRGenPreparePipeline(P);
+
+  if (Options.DebugSerialization) {
+    addPerfDebugSerializationPipeline(P);
+    return P;
+  }
+
+  P.startPipeline("SILOpt Prepare Passes");
+  P.addAccessMarkerElimination();
+
   return P;
 }
 
@@ -527,7 +549,7 @@ void SILPassPipelinePlan::addPasses(ArrayRef<PassKind> PassKinds) {
     // updated.
     switch (K) {
 // Each pass gets its own add-function.
-#define PASS(ID, NAME, DESCRIPTION)                                            \
+#define PASS(ID, TAG, NAME)                                                    \
   case PassKind::ID: {                                                         \
     add##ID();                                                                 \
     break;                                                                     \
@@ -568,7 +590,7 @@ void SILPassPipelinePlan::print(llvm::raw_ostream &os) {
                os << "        \"" << Pipeline.Name << "\"";
                for (PassKind Kind : getPipelinePasses(Pipeline)) {
                  os << ",\n        [\"" << PassKindID(Kind) << "\","
-                    << PassKindName(Kind) << ']';
+                    << "\"" << PassKindTag(Kind) << "\"]";
                }
              },
              [&] { os << "\n    ],\n"; });
